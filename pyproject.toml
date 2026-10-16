@@ -49,8 +49,8 @@ dev = [
     "mypy>=1.0",
 ]
 ascend = [
-    # TODO: vllm-ascend backend adapter dependencies
-    # "vllm-ascend",
+    "vllm>=0.6.0",
+    "vllm-ascend>=0.0.1",
 ]
 sandbox = [
     # TODO: sandbox container runtime dependencies
