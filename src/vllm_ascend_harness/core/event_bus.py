@@ -31,6 +31,7 @@ class EventBus:
     def __init__(self, error_isolation: bool = True) -> None:
         self._handlers: dict[str, list[EventHandler]] = defaultdict(list)
         self._error_isolation = error_isolation
+        self.last_errors: list[tuple[str, Exception]] = []
 
     def subscribe(self, topic: str, handler: EventHandler) -> None:
         """Register *handler* for *topic*."""
@@ -49,7 +50,7 @@ class EventBus:
         and stored in :attr:`last_errors`.  Otherwise the first
         exception propagates immediately.
         """
-        self.last_errors: list[tuple[str, Exception]] = []
+        self.last_errors = []
         for handler in self._handlers.get(topic, []):
             try:
                 handler(event)
