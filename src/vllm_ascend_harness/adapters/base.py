@@ -52,13 +52,21 @@ class BaseModelAdapter(ABC):
     def stream(self, request: GenerationRequest) -> Iterator[GenerationResult]:
         """Stream tokens for *request*.
 
-        TODO: implement streaming support for backends that support it.
+        Base implementation raises :class:`NotImplementedError`.
+        Override in subclasses whose backend supports streaming
+        (e.g. :class:`~vllm_ascend_harness.adapters.mock.MockAdapter`
+        and
+        :class:`~vllm_ascend_harness.adapters.vllm_ascend.VllmAscendAdapter`).
         """
         raise NotImplementedError("Streaming not supported by this adapter")
 
     def health_check(self) -> bool:
-        """Return whether the backend is reachable and ready."""
-        # TODO: implement backend health probe
+        """Return whether the backend is reachable and ready.
+
+        Base implementation returns ``True`` (assumed healthy).
+        Override in subclasses to perform a real backend probe
+        (e.g. checking engine initialisation status).
+        """
         return True
 
     def close(self) -> None:

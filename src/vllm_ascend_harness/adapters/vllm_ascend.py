@@ -124,13 +124,39 @@ class VllmAscendAdapter(BaseModelAdapter):
     def stream(self, request: GenerationRequest) -> Iterator[GenerationResult]:
         """Stream tokens from the vLLM engine.
 
-        TODO: implement async streaming via vLLM's async engine when
-        the Ascend backend supports it.
+        Uses vLLM's ``stream_output`` API when available to yield
+        :class:`GenerationResult` chunks token-by-token.  Falls back
+        to a single-shot ``generate()`` call wrapped in a one-element
+        iterator when the streaming API is unavailable.
         """
-        raise NotImplementedError(
-            "Streaming not yet supported for VllmAscendAdapter. "
-            "Use generate() for now."
-        )
+        if self._engine is None:
+            raise RuntimeError("VllmAscendAdapter engine not initialized")
+
+        sampling_params = self._SamplingParams(**_request_to_sampling_params(request))
+
+        stream_fn = getattr(self._engine, "stream_output", None)
+        if stream_fn is not None:
+            prompt_tokens = 0
+            for i, chunk in enumerate(stream_fn([request.prompt], sampling_params)):
+                if not chunk.outputs:
+                    continue
+                output = chunk.outputs[0]
+                if i == 0 and output.prompt_token_ids:
+                    prompt_tokens = len(output.prompt_ids)
+                yield GenerationResult(
+                    text=output.text,
+                    prompt_tokens=prompt_tokens if i == 0 else 0,
+                    completion_tokens=len(output.token_ids) if output.token_ids else 1,
+                    finish_reason=output.finish_reason or "length",
+                    metadata={
+                        "model": self.model,
+                        "streaming": True,
+                    },
+                )
+            return
+
+        result = self.generate(request)
+        yield result
 
     def health_check(self) -> bool:
         """Return whether the vLLM engine is initialized and ready."""

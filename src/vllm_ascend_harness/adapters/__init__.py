@@ -11,10 +11,12 @@ from vllm_ascend_harness.adapters.base import (
     GenerationResult,
 )
 from vllm_ascend_harness.adapters.mock import MockAdapter
+from vllm_ascend_harness.adapters.vllm_ascend import VllmAscendAdapter
 
 __all__ = [
     "BaseModelAdapter",
     "GenerationRequest",
     "GenerationResult",
     "MockAdapter",
+    "VllmAscendAdapter",
 ]
