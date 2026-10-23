@@ -28,6 +28,8 @@ class PluginManager:
 
     def __init__(self) -> None:
         self._plugins: dict[str, Plugin] = {}
+        self._factories: dict[str, Callable[..., Plugin]] = {}
+        self._factory_kwargs: dict[str, dict[str, Any]] = {}
 
     def register(self, plugin: Plugin, **kwargs: Any) -> None:
         """Register *plugin* and call its ``initialize`` hook."""
@@ -39,18 +41,42 @@ class PluginManager:
     def unregister(self, name: str) -> None:
         """Remove a registered plugin by *name*."""
         self._plugins.pop(name, None)
+        self._factories.pop(name, None)
+        self._factory_kwargs.pop(name, None)
 
     def get(self, name: str) -> Plugin | None:
-        """Look up a plugin by *name*."""
-        return self._plugins.get(name)
+        """Look up a plugin by *name*.
+
+        If only a factory is registered, instantiate it lazily on the
+        first call and cache the result.
+        """
+        if name in self._plugins:
+            return self._plugins[name]
+        if name in self._factories:
+            factory = self._factories[name]
+            kwargs = self._factory_kwargs.get(name, {})
+            plugin = factory(**kwargs)
+            plugin.initialize(**kwargs)
+            self._plugins[name] = plugin
+            del self._factories[name]
+            del self._factory_kwargs[name]
+            return plugin
+        return None
 
     def list_plugins(self) -> list[str]:
-        """Return all registered plugin names."""
-        return list(self._plugins.keys())
+        """Return all registered plugin names (including lazy factories)."""
+        return list(set(self._plugins.keys()) | set(self._factories.keys()))
 
-    def register_factory(self, name: str, factory: Callable[..., Plugin]) -> None:
+    def register_factory(
+        self, name: str, factory: Callable[..., Plugin], **kwargs: Any
+    ) -> None:
         """Register a lazy factory for plugin *name*.
 
-        TODO: implement lazy instantiation on first ``get``.
+        The factory is called with *kwargs* on the first :meth:`get`
+        invocation, and the resulting plugin is cached for subsequent
+        lookups.
         """
-        raise NotImplementedError
+        if name in self._plugins or name in self._factories:
+            raise ValueError(f"Plugin already registered: {name}")
+        self._factories[name] = factory
+        self._factory_kwargs[name] = kwargs

@@ -13,6 +13,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+FINISH_SENTINELS = ("[DONE]", "[FINISH]", "<task_complete>", "[END]")
+
 
 @dataclass
 class AgentStep:
@@ -22,6 +24,7 @@ class AgentStep:
     input: Any
     output: Any = None
     metadata: dict = field(default_factory=dict)
+    finished: bool = False
 
 
 @dataclass
@@ -60,20 +63,37 @@ class AgentLoop(ABC):
         """Run the agent loop to completion.
 
         Iterates :meth:`step` until the agent signals completion or
-        ``max_steps`` is reached.
+        ``max_steps`` is reached.  Completion is detected via the
+        ``finished`` flag on :class:`AgentStep`, the explicit finish
+        sentinels in output text, or the finish_reason from the model.
         """
-        # TODO: implement completion-detection logic
         while len(self.context.steps) < self.context.max_steps:
             step = self.step()
             self.context.steps.append(step)
+            if self.event_bus is not None:
+                self.event_bus.publish("agent.step", step)
             if self._is_done(step):
+                step.finished = True
                 break
         return self.context.steps
 
     def _is_done(self, step: AgentStep) -> bool:
         """Determine whether the agent should stop after *step*.
 
-        TODO: implement stop-condition logic (e.g. sentinel skill
-        output, tool-finish signal).
+        The agent signals completion via any of:
+        - ``step.finished`` flag explicitly set by the step logic
+        - A finish sentinel (``[DONE]``, ``[FINISH]``, etc.) in the
+          string output
+        - ``finish_reason == "stop"`` in step metadata
         """
+        if step.finished:
+            return True
+        output = step.output
+        if isinstance(output, str):
+            for sentinel in FINISH_SENTINELS:
+                if sentinel in output:
+                    return True
+        finish_reason = step.metadata.get("finish_reason")
+        if finish_reason == "stop":
+            return True
         return False
