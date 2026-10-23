@@ -15,7 +15,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from vllm_ascend_harness.evaluator.scorer import BaseScorer
 
@@ -24,7 +24,7 @@ SUPPORTED_METRICS = ("accuracy", "pass_at_k", "bleu", "rouge_l", "contains")
 
 # Extension point: override this to integrate real AIS-Bench framework.
 # Set to a callable(output: str, expected: str, metric: str) -> float.
-_ais_bench_evaluator: Any = None
+_ais_bench_evaluator: Callable[[str, str, str], float] | None = None
 
 
 def set_ais_bench_evaluator(evaluator: Any) -> None:
@@ -160,18 +160,61 @@ def _rouge_l(output: str, expected: str) -> float:
 
 
 def _pass_at_k(output: str, expected: str, k: int = 1) -> float:
-    """Check if the expected answer appears in the output (pass@1).
+    """Compute pass@k for code generation tasks.
 
-    For k>1, this would need multiple samples; currently treats each
-    call as a single sample and checks accuracy.
+    For k=1, this is a simple accuracy check (normalized exact match).
+    For k>1, the standard pass@k formula is applied assuming *output*
+    contains ``k`` newline-separated candidate answers:
+
+    .. math::
+        pass@k = 1 - \\binom{n-c}{k} / \\binom{n}{k}
+
+    where *n* is the total number of samples and *c* is the number
+    of correct samples.  When only a single output is provided (no
+    newline), pass@k reduces to a single-sample accuracy check.
     """
     if k <= 0:
         return 0.0
-    return _accuracy(output, expected)
+
+    candidates = output.split("\n") if "\n" in output else [output]
+    n = len(candidates)
+    correct = sum(
+        1 for c in candidates if _normalize(c) == _normalize(expected)
+    )
+
+    if n == 0 or correct == 0:
+        return 0.0
+    if correct >= k:
+        return 1.0
+
+    if k == 1:
+        return _accuracy(output, expected)
+
+    if n < k:
+        return float(correct) / n
+
+    from functools import reduce
+    from operator import mul
+
+    def _comb(a: int, b: int) -> int:
+        if b > a or b < 0:
+            return 0
+        if b == 0:
+            return 1
+        b = min(b, a - b)
+        num = reduce(mul, range(a, a - b, -1), 1)
+        den = reduce(mul, range(1, b + 1), 1)
+        return num // den
+
+    total = _comb(n, k)
+    fail = _comb(n - correct, k)
+    if total == 0:
+        return 0.0
+    return 1.0 - fail / total
 
 
 # Metric name → computation function
-_METRIC_FUNCTIONS = {
+_METRIC_FUNCTIONS: dict[str, Callable[..., float]] = {
     "accuracy": _accuracy,
     "pass_at_k": _pass_at_k,
     "bleu": _bleu,
