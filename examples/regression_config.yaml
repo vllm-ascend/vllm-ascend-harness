@@ -1,0 +1,38 @@
+# Regression evaluation configuration.
+#
+# Usage:
+#   python examples/run_regression_eval.py --config examples/regression_config.yaml
+#
+# Fields:
+#   adapter:  Adapter configuration (name + kwargs)
+#   scorer:   Scorer configuration (name + kwargs)
+#   tasks:    List of evaluation tasks
+#     - task_id:   Unique identifier
+#       prompt:    Input prompt
+#       expected:  Expected output for scoring
+#       category:  Category label for breakdown (optional)
+
+adapter:
+  name: mock
+  kwargs:
+    prefix: "[mock] "
+
+scorer:
+  name: exact-match
+  kwargs: {}
+
+tasks:
+  - task_id: reg-001
+    prompt: hello
+    expected: "[mock] hello"
+    category: greeting
+
+  - task_id: reg-002
+    prompt: world
+    expected: "[mock] world"
+    category: greeting
+
+  - task_id: reg-003
+    prompt: vllm
+    expected: ascend
+    category: code
