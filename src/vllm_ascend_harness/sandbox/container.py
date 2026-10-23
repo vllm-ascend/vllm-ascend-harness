@@ -14,7 +14,7 @@ from __future__ import annotations
 import subprocess
 import time
 
-from vllm_ascend_harness.sandbox.base import BaseSandbox, SandboxResult
+from vllm_ascend_harness.sandbox.base import BaseSandbox, SandboxLimits, SandboxResult
 from vllm_ascend_harness.sandbox.whitelist import CommandWhitelist
 
 # Default Ascend device nodes to mount into containers
@@ -70,13 +70,15 @@ class ContainerSandbox(BaseSandbox):
         memory_limit: str | None = None,
         network: str = "none",
         workdir: str = "/workspace",
+        limits: SandboxLimits | None = None,
     ) -> None:
+        super().__init__(limits=limits)
         self.image = image
         self.whitelist = whitelist or CommandWhitelist()
         self.devices = devices if devices is not None else list(DEFAULT_ASCEND_DEVICES)
-        self.cpu_limit = cpu_limit
-        self.memory_limit = memory_limit
-        self.network = network
+        self.cpu_limit = cpu_limit or self.limits.cpu_limit
+        self.memory_limit = memory_limit or self.limits.memory_limit
+        self.network = "none" if not self.limits.network_enabled else network
         self.workdir = workdir
         self._container_id: str | None = None
         self._docker_ok: bool | None = None
@@ -133,7 +135,7 @@ class ContainerSandbox(BaseSandbox):
             )
         self._container_id = result.stdout.strip()
 
-    def run(self, command: str, timeout: int = 60) -> SandboxResult:
+    def run(self, command: str, timeout: int | None = None) -> SandboxResult:
         """Execute *command* inside the container via ``docker exec``.
 
         Returns
@@ -143,6 +145,8 @@ class ContainerSandbox(BaseSandbox):
         """
         if self._container_id is None:
             raise RuntimeError("Container not started. Call setup() first.")
+
+        effective_timeout = timeout if timeout is not None else self.limits.timeout
 
         if not self.whitelist.is_allowed(command):
             return SandboxResult(
@@ -166,12 +170,15 @@ class ContainerSandbox(BaseSandbox):
                 exec_args,
                 capture_output=True,
                 text=True,
-                timeout=timeout,
+                timeout=effective_timeout,
             )
             duration = int((time.monotonic() - start) * 1000)
+            stdout = proc.stdout
+            if self.limits.max_file_size and len(stdout) > self.limits.max_file_size:
+                stdout = stdout[: self.limits.max_file_size]
             return SandboxResult(
                 exit_code=proc.returncode,
-                stdout=proc.stdout,
+                stdout=stdout,
                 stderr=proc.stderr,
                 duration_ms=duration,
                 metadata={
@@ -184,7 +191,7 @@ class ContainerSandbox(BaseSandbox):
             duration = int((time.monotonic() - start) * 1000)
             return SandboxResult(
                 exit_code=124,
-                stderr=f"Command timed out after {timeout}s",
+                stderr=f"Command timed out after {effective_timeout}s",
                 duration_ms=duration,
                 metadata={"command": command, "timeout": True},
             )

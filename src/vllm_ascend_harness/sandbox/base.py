@@ -11,6 +11,18 @@ from dataclasses import dataclass
 
 
 @dataclass
+class SandboxLimits:
+    """Resource and network policy constraints for a sandbox."""
+
+    cpu_limit: str | None = None
+    memory_limit: str | None = None
+    timeout: int = 60
+    network_enabled: bool = True
+    max_file_size: int | None = None
+    env: dict[str, str] | None = None
+
+
+@dataclass
 class SandboxResult:
     """Result of a sandboxed command execution."""
 
@@ -26,13 +38,26 @@ class BaseSandbox(ABC):
 
     Extension point: implement container-based or process-based
     isolation strategies.
+
+    Parameters
+    ----------
+    limits:
+        Optional :class:`SandboxLimits` controlling CPU, memory,
+        network, and timeout constraints for every command executed
+        in this sandbox.
     """
 
+    def __init__(self, limits: SandboxLimits | None = None) -> None:
+        self.limits = limits or SandboxLimits()
+
     @abstractmethod
-    def run(self, command: str, timeout: int = 60) -> SandboxResult:
+    def run(self, command: str, timeout: int | None = None) -> SandboxResult:
         """Execute *command* inside the sandbox.
 
-        TODO: enforce resource limits and network policies.
+        The effective timeout is ``timeout`` if given, otherwise
+        ``self.limits.timeout``.  Subclasses must enforce resource
+        limits (CPU, memory) and network policies from
+        :attr:`limits` when applicable.
         """
         ...
 

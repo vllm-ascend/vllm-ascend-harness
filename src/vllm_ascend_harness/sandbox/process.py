@@ -17,7 +17,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from vllm_ascend_harness.sandbox.base import BaseSandbox, SandboxResult
+from vllm_ascend_harness.sandbox.base import BaseSandbox, SandboxLimits, SandboxResult
 from vllm_ascend_harness.sandbox.whitelist import CommandWhitelist
 
 
@@ -42,17 +42,22 @@ class ProcessSandbox(BaseSandbox):
         whitelist: CommandWhitelist | None = None,
         workdir: str | Path | None = None,
         env: dict[str, str] | None = None,
+        limits: SandboxLimits | None = None,
     ) -> None:
+        super().__init__(limits=limits)
         self.whitelist = whitelist or CommandWhitelist()
         self.workdir = str(workdir) if workdir else None
-        self.env = env
+        if self.limits.env:
+            self.env: dict[str, str] | None = {**(env or {}), **self.limits.env}
+        else:
+            self.env = env
         self._active = False
 
     def setup(self) -> None:
         """Mark the sandbox as active."""
         self._active = True
 
-    def run(self, command: str, timeout: int = 60) -> SandboxResult:
+    def run(self, command: str, timeout: int | None = None) -> SandboxResult:
         """Execute *command* in a subprocess.
 
         Returns
@@ -62,6 +67,8 @@ class ProcessSandbox(BaseSandbox):
         """
         if not self._active:
             self.setup()
+
+        effective_timeout = timeout if timeout is not None else self.limits.timeout
 
         if not self.whitelist.is_allowed(command):
             return SandboxResult(
@@ -73,7 +80,7 @@ class ProcessSandbox(BaseSandbox):
         start = time.monotonic()
         try:
             if os.name == "nt":
-                args = command
+                args: list[str] | str = command
                 shell = True
             else:
                 args = shlex.split(command)
@@ -83,15 +90,18 @@ class ProcessSandbox(BaseSandbox):
                 args,
                 capture_output=True,
                 text=True,
-                timeout=timeout,
+                timeout=effective_timeout,
                 cwd=self.workdir,
                 env={**os.environ, **self.env} if self.env else None,
                 shell=shell,
             )
             duration = int((time.monotonic() - start) * 1000)
+            stdout = proc.stdout
+            if self.limits.max_file_size and len(stdout) > self.limits.max_file_size:
+                stdout = stdout[: self.limits.max_file_size]
             return SandboxResult(
                 exit_code=proc.returncode,
-                stdout=proc.stdout,
+                stdout=stdout,
                 stderr=proc.stderr,
                 duration_ms=duration,
                 metadata={"command": command, "sandbox": "process"},
@@ -100,7 +110,7 @@ class ProcessSandbox(BaseSandbox):
             duration = int((time.monotonic() - start) * 1000)
             return SandboxResult(
                 exit_code=124,
-                stderr=f"Command timed out after {timeout}s",
+                stderr=f"Command timed out after {effective_timeout}s",
                 duration_ms=duration,
                 metadata={"command": command, "timeout": True},
             )
