@@ -10,9 +10,12 @@ pattern matching for flexible rule definitions.
 from __future__ import annotations
 
 import fnmatch
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+SHELL_SEPARATORS = ";&|"
 
 DEFAULT_ALLOWED = [
     "ls",
@@ -77,8 +80,9 @@ class CommandWhitelist:
 
         Checks:
         1. If any blocked substring appears in the command → reject
-        2. If the base command matches any allowed glob pattern → accept
-        3. Otherwise → reject
+        2. If the command contains shell substitution or a newline → reject
+        3. Every command segment (split on ``;``, ``&&``, ``||``, ``|``)
+           must have an allowed base command, otherwise → reject
         """
         command = command.strip()
         if not command:
@@ -88,9 +92,45 @@ class CommandWhitelist:
         if any(b in command for b in blocked):
             return False
 
-        base = command.split()[0]
+        if "$(" in command or "`" in command or "\n" in command:
+            return False
+
+        segments = self.split_segments(command)
+        if not segments:
+            return False
+
         allowed = self.allowed or []
-        return any(fnmatch.fnmatch(base, pattern) for pattern in allowed)
+        return all(
+            any(fnmatch.fnmatch(segment[0], pattern) for pattern in allowed)
+            for segment in segments
+        )
+
+    @staticmethod
+    def split_segments(command: str) -> list[list[str]]:
+        """Split *command* into shell segments, one per pipeline element.
+
+        ``echo hi; rm -rf build`` yields ``[["echo", "hi"], ["rm", "-rf",
+        "build"]]``.  Quoted separators stay inside their argument.
+        """
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=SHELL_SEPARATORS)
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return []
+
+        segments: list[list[str]] = []
+        current: list[str] = []
+        for token in tokens:
+            if token and set(token) <= set(SHELL_SEPARATORS):
+                if current:
+                    segments.append(current)
+                    current = []
+                continue
+            current.append(token)
+        if current:
+            segments.append(current)
+        return segments
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> CommandWhitelist:

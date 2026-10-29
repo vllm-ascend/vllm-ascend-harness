@@ -33,6 +33,26 @@ class TestWhitelistDefaults:
         assert wl.is_allowed("") is False
         assert wl.is_allowed("   ") is False
 
+    def test_chained_allowed_commands_are_allowed(self):
+        wl = CommandWhitelist()
+        assert wl.is_allowed("pytest -q && pytest -q") is True
+        assert wl.is_allowed("ls; echo done") is True
+
+    def test_blocked_trailing_segment_is_rejected(self):
+        wl = CommandWhitelist()
+        assert wl.is_allowed("echo hi; rm -rf build") is False
+        assert wl.is_allowed("git status; sh -c id") is False
+        assert wl.is_allowed("cat a | tee out.txt") is False
+
+    def test_quoted_separator_is_not_a_segment_boundary(self):
+        wl = CommandWhitelist()
+        assert wl.is_allowed('cat "a;b.txt"') is True
+
+    def test_command_substitution_is_rejected(self):
+        wl = CommandWhitelist()
+        assert wl.is_allowed("echo $(rm -rf x)") is False
+        assert wl.is_allowed("echo `id`") is False
+
 
 class TestWhitelistCustom:
     def test_custom_allowed(self):
